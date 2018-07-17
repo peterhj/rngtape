@@ -26,7 +26,12 @@ impl TapeDistribution<isize> for Uniform<isize> {
   fn read_tape(&self, tape: &mut TapeState) -> isize {
     assert!(tape.is_open());
     let next_val = match tape.ops[tape.op_ctr] {
-      TapeOp::RandomIntegers{ref data, ..} => data[tape.data_off],
+      TapeOp::RandomIntegers{ref data, low, high} => {
+        // TODO: test for distribution equality.
+        /*let test_dist = Uniform::new_inclusive(low, high);
+        assert_eq!(&test_dist, self);*/
+        data[tape.data_off]
+      }
       _ => panic!(),
     };
     tape.advance();
@@ -38,7 +43,10 @@ impl TapeDistribution<usize> for Uniform<usize> {
   fn read_tape(&self, tape: &mut TapeState) -> usize {
     assert!(tape.is_open());
     let next_val = match tape.ops[tape.op_ctr] {
-      TapeOp::RandomIntegers{ref data, ..} => {
+      TapeOp::RandomIntegers{ref data, low, high} => {
+        // TODO: test for distribution equality.
+        /*let test_dist = Uniform::new_inclusive(low as usize, high as usize);
+        assert_eq!(&test_dist, self);*/
         let x = data[tape.data_off];
         assert!(x >= 0);
         x as usize
@@ -107,12 +115,12 @@ impl TapeState {
   }
 }
 
-pub struct TapeRng {
+pub struct ReplayTapeRng {
   state:    TapeState,
 }
 
-impl TapeRng {
-  pub fn open(path: PathBuf) -> TapeRng {
+impl ReplayTapeRng {
+  pub fn open(path: PathBuf) -> ReplayTapeRng {
     let file = File::open(&path).unwrap();
     let mut reader = BufReader::new(file);
     let mut ops = vec![];
@@ -170,11 +178,11 @@ impl TapeRng {
       op_ctr:   0,
       data_off: 0,
     };
-    TapeRng{state}
+    ReplayTapeRng{state}
   }
 }
 
-impl RngCore for TapeRng {
+impl RngCore for ReplayTapeRng {
   fn next_u32(&mut self) -> u32 {
     unimplemented!();
   }
@@ -192,7 +200,7 @@ impl RngCore for TapeRng {
   }
 }
 
-impl Rng for TapeRng {
+impl Rng for ReplayTapeRng {
   fn sample<T, D: Distribution<T>>(&mut self, dist: D) -> T {
     <D as TapeDistribution<T>>::read_tape(&dist, &mut self.state)
   }
