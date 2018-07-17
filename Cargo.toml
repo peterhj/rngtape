@@ -1,0 +1,13 @@
+[package]
+name = "rngtape"
+version = "0.0.0"
+authors = ["Peter Jin <peterhaijin@gmail.com>"]
+
+[dependencies]
+byteorder = "*"
+#rand = "^0.5"
+rand = { path = "../rand" }
+
+[lib]
+name = "rngtape"
+path = "src/lib.rs"
