@@ -5,8 +5,7 @@ authors = ["Peter Jin <peterhaijin@gmail.com>"]
 
 [dependencies]
 byteorder = "*"
-#rand = "^0.5"
-rand = { path = "../rand" }
+rand = "^0.5"
 
 [lib]
 name = "rngtape"

@@ -1,3 +1,4 @@
+#![feature(core_intrinsics)]
 #![feature(specialization)]
 
 extern crate byteorder;
@@ -9,6 +10,7 @@ use rand::{Error};
 use rand::distributions::*;
 
 use std::fs::{File};
+use std::intrinsics::{type_name};
 use std::io::{BufReader, ErrorKind};
 use std::path::{PathBuf};
 
@@ -18,7 +20,7 @@ pub trait TapeDistribution<T>: Distribution<T> {
 
 impl<T, Dist> TapeDistribution<T> for Dist where Dist: Distribution<T> {
   default fn read_tape(&self, _tape: &mut TapeState) -> T {
-    unimplemented!();
+    unimplemented!("type: {:?} dist: {:?}", unsafe { type_name::<T>() }, unsafe { type_name::<Dist>() });
   }
 }
 
@@ -26,7 +28,7 @@ impl TapeDistribution<isize> for Uniform<isize> {
   fn read_tape(&self, tape: &mut TapeState) -> isize {
     assert!(tape.is_open());
     let next_val = match tape.ops[tape.op_ctr] {
-      TapeOp::RandomIntegers{ref data, low, high} => {
+      TapeOp::RandomIntegers{ref data, low, high, ..} => {
         // TODO: test for distribution equality.
         /*let test_dist = Uniform::new_inclusive(low, high);
         assert_eq!(&test_dist, self);*/
@@ -43,7 +45,7 @@ impl TapeDistribution<usize> for Uniform<usize> {
   fn read_tape(&self, tape: &mut TapeState) -> usize {
     assert!(tape.is_open());
     let next_val = match tape.ops[tape.op_ctr] {
-      TapeOp::RandomIntegers{ref data, low, high} => {
+      TapeOp::RandomIntegers{ref data, low, high, ..} => {
         // TODO: test for distribution equality.
         /*let test_dist = Uniform::new_inclusive(low as usize, high as usize);
         assert_eq!(&test_dist, self);*/
@@ -108,6 +110,7 @@ impl TapeState {
     self.data_off += 1;
     if self.data_off == self.ops[self.op_ctr].data_len() {
       self.op_ctr += 1;
+      self.data_off = 0;
       if self.op_ctr == self.ops.len() {
         self.closed = true;
       }
