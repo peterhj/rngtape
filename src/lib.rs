@@ -4,6 +4,8 @@
 extern crate byteorder;
 extern crate rand;
 
+use distributions::*;
+
 use byteorder::*;
 use rand::prelude::*;
 use rand::{Error};
@@ -13,6 +15,8 @@ use std::fs::{File};
 use std::intrinsics::{type_name};
 use std::io::{BufReader, ErrorKind};
 use std::path::{PathBuf};
+
+pub mod distributions;
 
 pub trait TapeDistribution<T>: Distribution<T> {
   fn read_tape(&self, tape: &mut TapeState) -> T;
@@ -26,48 +30,99 @@ impl<T, Dist> TapeDistribution<T> for Dist where Dist: Distribution<T> {
 
 impl TapeDistribution<isize> for Uniform<isize> {
   fn read_tape(&self, tape: &mut TapeState) -> isize {
-    assert!(tape.is_open());
     let next_val = match tape.ops[tape.op_ctr] {
       TapeOp::RandomIntegers{ref data, low, high, ..} => {
         // TODO: test for distribution equality.
-        /*let test_dist = Uniform::new_inclusive(low, high);
-        assert_eq!(&test_dist, self);*/
         data[tape.data_off]
       }
       _ => panic!(),
     };
-    tape.advance();
     next_val
   }
 }
 
 impl TapeDistribution<usize> for Uniform<usize> {
   fn read_tape(&self, tape: &mut TapeState) -> usize {
-    assert!(tape.is_open());
     let next_val = match tape.ops[tape.op_ctr] {
       TapeOp::RandomIntegers{ref data, low, high, ..} => {
         // TODO: test for distribution equality.
-        /*let test_dist = Uniform::new_inclusive(low as usize, high as usize);
-        assert_eq!(&test_dist, self);*/
         let x = data[tape.data_off];
         assert!(x >= 0);
         x as usize
       }
       _ => panic!(),
     };
-    tape.advance();
+    next_val
+  }
+}
+
+impl TapeDistribution<isize> for AbstractUniform<isize> {
+  fn read_tape(&self, tape: &mut TapeState) -> isize {
+    let next_val = match tape.ops[tape.op_ctr] {
+      TapeOp::RandomIntegers{ref data, low, high, ..} => {
+        let test_dist = AbstractUniform::new_inclusive(low, high);
+        assert_eq!(*self, test_dist);
+        data[tape.data_off]
+      }
+      _ => panic!(),
+    };
+    next_val
+  }
+}
+
+impl TapeDistribution<usize> for AbstractUniform<usize> {
+  fn read_tape(&self, tape: &mut TapeState) -> usize {
+    let next_val = match tape.ops[tape.op_ctr] {
+      TapeOp::RandomIntegers{ref data, low, high, ..} => {
+        assert!(low >= 0);
+        assert!(high >= 0);
+        let test_dist = AbstractUniform::new_inclusive(low as usize, high as usize);
+        assert_eq!(*self, test_dist);
+        let x = data[tape.data_off];
+        assert!(x >= 0);
+        x as usize
+      }
+      _ => panic!(),
+    };
     next_val
   }
 }
 
 impl TapeDistribution<f64> for StandardNormal {
   fn read_tape(&self, tape: &mut TapeState) -> f64 {
-    assert!(tape.is_open());
     let next_val = match tape.ops[tape.op_ctr] {
-      TapeOp::StandardNormal{ref data, ..} => data[tape.data_off],
+      TapeOp::StandardNormal{ref data, ..} => {
+        data[tape.data_off]
+      }
       _ => panic!(),
     };
-    tape.advance();
+    next_val
+  }
+}
+
+impl TapeDistribution<f64> for Normal {
+  fn read_tape(&self, tape: &mut TapeState) -> f64 {
+    let next_val = match tape.ops[tape.op_ctr] {
+      TapeOp::Normal{ref data, mean, stddev} => {
+        // TODO: test for distribution equality.
+        data[tape.data_off]
+      }
+      _ => panic!(),
+    };
+    next_val
+  }
+}
+
+impl TapeDistribution<f64> for AbstractNormal {
+  fn read_tape(&self, tape: &mut TapeState) -> f64 {
+    let next_val = match tape.ops[tape.op_ctr] {
+      TapeOp::Normal{ref data, mean, stddev} => {
+        let test_dist = AbstractNormal::new(mean, stddev);
+        assert_eq!(*self, test_dist);
+        data[tape.data_off]
+      }
+      _ => panic!(),
+    };
     next_val
   }
 }
@@ -83,6 +138,11 @@ enum TapeOp {
     shape:  Vec<isize>,
     data:   Vec<f64>,
   },
+  Normal{
+    mean:   f64,
+    stddev: f64,
+    data:   Vec<f64>,
+  },
 }
 
 impl TapeOp {
@@ -90,6 +150,7 @@ impl TapeOp {
     match self {
       &TapeOp::RandomIntegers{ref data, ..} => data.len(),
       &TapeOp::StandardNormal{ref data, ..} => data.len(),
+      &TapeOp::Normal{ref data, ..} => data.len(),
     }
   }
 }
@@ -126,6 +187,12 @@ impl ReplayTapeRng {
   pub fn open(path: PathBuf) -> ReplayTapeRng {
     let file = File::open(&path).unwrap();
     let mut reader = BufReader::new(file);
+    let mut magic = Vec::with_capacity(7);
+    for _ in 0 .. 7 {
+      magic.push(reader.read_u8().unwrap());
+    }
+    assert_eq!(b"RNGTAPE", &magic as &[u8]);
+    let _version = reader.read_u8().unwrap();
     let mut ops = vec![];
     loop {
       let ty0 = match reader.read_u8() {
@@ -138,8 +205,10 @@ impl ReplayTapeRng {
         Ok(x) => x,
       };
       let ty1 = reader.read_u8().unwrap();
-      let op = match &[ty0, ty1] {
-        b"ri" => {
+      let ty2 = reader.read_u8().unwrap();
+      let ty3 = reader.read_u8().unwrap();
+      let op = match &[ty0, ty1, ty2, ty3] {
+        b"Dri." => {
           let low = reader.read_i64::<LittleEndian>().unwrap() as isize;
           let high = reader.read_i64::<LittleEndian>().unwrap() as isize;
           let shape_ndims = reader.read_i64::<LittleEndian>().unwrap() as isize;
@@ -156,7 +225,7 @@ impl ReplayTapeRng {
           }
           TapeOp::RandomIntegers{low, high, shape, data}
         }
-        b"sn" => {
+        b"Dsn." => {
           let shape_ndims = reader.read_i64::<LittleEndian>().unwrap() as isize;
           let mut flat_len = 1;
           let mut shape = Vec::with_capacity(shape_ndims as _);
@@ -205,6 +274,9 @@ impl RngCore for ReplayTapeRng {
 
 impl Rng for ReplayTapeRng {
   fn sample<T, D: Distribution<T>>(&mut self, dist: D) -> T {
-    <D as TapeDistribution<T>>::read_tape(&dist, &mut self.state)
+    assert!(self.state.is_open());
+    let x = <D as TapeDistribution<T>>::read_tape(&dist, &mut self.state);
+    self.state.advance();
+    x
   }
 }
